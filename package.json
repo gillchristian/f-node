@@ -1,0 +1,9 @@
+{
+  "name": "f-node",
+  "version": "0.0.1",
+  "description": "search a string in a directory",
+  "main": "index.js",
+  "bin": "bin/f-node",
+  "author": "Christiang Gill <gillchristiang@gmail.com>",
+  "license": "MIT"
+}
