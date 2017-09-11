@@ -2,6 +2,10 @@ const path = require('path')
 const { promisify } = require('util')
 const fs = require('fs')
 
+const Queue = require('./queue')
+
+const filesQueue = new Queue(180)
+
 const readdir = promisify(fs.readdir)
 const stat = promisify(fs.stat)
 const readfile = promisify(fs.readFile)
@@ -22,14 +26,17 @@ function main () {
   }
 
   const started = Date.now()
+  const results = { matched: 0, total: 0 }
 
-  const ps = roots.map(walkDir(query))
+  roots.forEach(walkDir(query))
 
-  Promise.all(ps)
-  .then(partials => {
-    const { matched, total } = partials.reduce(count, { matched: 0, total: 0 })
+  filesQueue.subscribe((err, result) => {
+    results.matched += result.matched
+    results.total += result.total
+  })
 
-    console.log(`Found ${matched} matches in ${total} files`)
+  filesQueue.handleDone(() => {
+    console.log(`Found ${results.matched} matches in ${results.total} files`)
     console.log(`Took ${(Date.now() - started)/1000}s.`)
   })
 }
@@ -83,27 +90,24 @@ function checkFile(query) {
 
 // walkDir :: String -> String -> Promise({ matched: Int, total: Int })
 function walkDir(query) {
-  return (dir) =>  readdir(dir)
-  .catch((err) => {
-    console.error('Error walking directory')
-    console.error(err)
-    return []
-  })
-  .then(map(file => path.join(dir, file)))
-  .then(map(fileAndStats))
-  .then(ps => Promise.all(ps))
-  .then(filter(f => prop('isDir')(f) || prop('isFile')(f)))
-  .then(map(f => {
-    const name = prop('name')(f)
-    return prop('isDir')(f)
-      ? walkDir(query)(name)
-      : checkFile(query)(name)
-  }))
-  .then(ps => Promise.all(ps))
-  .then(reduce(count, { matched: 0, total: 0 }))
-  .catch((err) => {
-    console.error('Error checking files')
-    console.error(err)
-    return { matched: 0, total: 0 }
-  })
+  return (dir) =>  {
+    readdir(dir)
+    .catch((err) => {
+      console.error('Error walking directory')
+      console.error(err)
+      return []
+    })
+    .then(map(file => path.join(dir, file)))
+    .then(map(fileAndStats))
+    .then(ps => Promise.all(ps))
+    .then(filter(f => prop('isDir')(f) || prop('isFile')(f)))
+    .then(map(f => {
+      const name = prop('name')(f)
+      if (prop('isDir')(f)) {
+        walkDir(query)(name)
+      } else {
+        filesQueue.schedule(() => checkFile(query)(name))
+      }
+    }))
+  }
 }
